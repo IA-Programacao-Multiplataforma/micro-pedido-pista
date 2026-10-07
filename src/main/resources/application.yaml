@@ -1,0 +1,37 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: pedido
+  data:
+    mongodb:
+      auto-index-creation: true
+      # Segredos (MONGO_URI, RABBITMQ_URI, JWT_SECRET) vêm de variáveis de ambiente, nunca do código
+      uri: ${MONGO_URI}
+  rabbitmq:
+    addresses: ${RABBITMQ_URI}
+    publisher-confirm-type: correlated
+    listener:
+      simple:
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1s
+          multiplier: 2.0
+
+jwt:
+  secret: ${JWT_SECRET}
+
+fila:
+  url: http://localhost:8084
+estoque:
+  url: http://localhost:8082
+
+pedido:
+  tempo-minimo-pagar-segundos: 60
+
+mensageria:
+  outbox:
+    intervalo-ms: 1000
