@@ -13,8 +13,7 @@ public record RelatorioVendas(
     }
 
     public record Totais(
-            int pedidosPagos,
-            int pedidosRecusados,
+            int pedidosRealizados,
             int pedidosCancelados,
             int pedidosEmAndamento,
             int ingressosVendidos,
@@ -25,7 +24,7 @@ public record RelatorioVendas(
     public record PorEvento(
             String eventoId,
             String eventoTitulo,
-            int pedidosPagos,
+            int pedidosRealizados,
             int ingressosVendidos,
             BigDecimal receita,
             List<PorSetor> setores

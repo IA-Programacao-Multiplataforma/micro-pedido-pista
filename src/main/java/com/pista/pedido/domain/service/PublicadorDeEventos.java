@@ -1,6 +1,6 @@
 package com.pista.pedido.domain.service;
 
-// A implementação grava na outbox, dentro da transação em andamento: estado e mensagem são gravados juntos ou nenhum dos dois.
+// Envia uma mensagem ao RabbitMQ (exchange pista.eventos) com a routing key informada
 public interface PublicadorDeEventos {
     void publicar(String routingKey, Object dados);
 }

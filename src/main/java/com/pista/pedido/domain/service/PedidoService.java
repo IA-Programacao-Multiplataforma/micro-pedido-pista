@@ -1,112 +1,112 @@
 package com.pista.pedido.domain.service;
 
+import java.math.BigDecimal;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-import com.pista.pedido.domain.client.EstoqueClient;
-import com.pista.pedido.domain.client.FilaClient;
 import com.pista.pedido.domain.entity.IngressoEmitido;
-import com.pista.pedido.domain.entity.InfoSessao;
 import com.pista.pedido.domain.entity.ItemPedido;
 import com.pista.pedido.domain.entity.Pedido;
 import com.pista.pedido.domain.entity.PedidoComIngressos;
-import com.pista.pedido.domain.entity.Sacola;
 import com.pista.pedido.domain.entity.enumerable.StatusPedido;
-import com.pista.pedido.domain.evento.PedidoPago;
-import com.pista.pedido.domain.evento.ReservaConfirmacaoFalhou;
-import com.pista.pedido.domain.evento.ReservaConfirmada;
-import com.pista.pedido.domain.evento.ReservaConfirmar;
-import com.pista.pedido.domain.exception.ConflitoException;
+import com.pista.pedido.domain.evento.PedidoCancelado;
+import com.pista.pedido.domain.evento.PedidoCriado;
+import com.pista.pedido.domain.evento.PedidoRealizado;
 import com.pista.pedido.domain.exception.DuplicadoException;
-import com.pista.pedido.domain.exception.MensagemDuplicadaException;
 import com.pista.pedido.domain.exception.NaoEncontradoException;
 import com.pista.pedido.domain.exception.RegraDeNegocioException;
-import com.pista.pedido.domain.exception.SacolaJaEmPedidoException;
 import com.pista.pedido.domain.repository.IngressoRepository;
 import com.pista.pedido.domain.repository.PedidoRepository;
 
+/*
+ * Ciclo do pedido:
+ *   1. criar(): grava o pedido como PROCESSANDO e envia "pedido.criado" ao Estoque (RabbitMQ);
+ *   2. o Estoque responde "pedido.realizado" -> aoRealizado(): status REALIZADO e emite os ingressos;
+ *      ou responde "pedido.cancelado"       -> aoCancelado(): status CANCELADO.
+ */
 public class PedidoService {
 
     private final PedidoRepository pedidos;
     private final IngressoRepository ingressos;
-    private final FilaClient fila;
-    private final EstoqueClient estoque;
     private final PublicadorDeEventos publicador;
-    private final EventosProcessados processados;
-    private final UnidadeDeTrabalho unidade;
+    private final UnidadeDeTrabalho transacao;
     private final Clock clock;
-    private final Duration tempoMinimoParaPagar;
 
-    public PedidoService(PedidoRepository pedidos, IngressoRepository ingressos, FilaClient fila,
-                         EstoqueClient estoque, PublicadorDeEventos publicador, EventosProcessados processados,
-                         UnidadeDeTrabalho unidade, Clock clock, Duration tempoMinimoParaPagar) {
+    public PedidoService(PedidoRepository pedidos, IngressoRepository ingressos, PublicadorDeEventos publicador,
+                         UnidadeDeTrabalho transacao, Clock clock) {
         this.pedidos = pedidos;
         this.ingressos = ingressos;
-        this.fila = fila;
-        this.estoque = estoque;
         this.publicador = publicador;
-        this.processados = processados;
-        this.unidade = unidade;
+        this.transacao = transacao;
         this.clock = clock;
-        this.tempoMinimoParaPagar = tempoMinimoParaPagar;
     }
 
-    public Pedido criar(String usuarioId, String credencial, String chaveIdempotencia, String sessaoId) {
+    public Pedido criar(String usuarioId, String chaveIdempotencia, String sessaoId, List<PedidoCriado.Item> itens) {
         if (chaveIdempotencia == null || chaveIdempotencia.isBlank()) {
             throw new RegraDeNegocioException("Idempotency-Key é obrigatório");
         }
+        if (itens == null || itens.isEmpty() || itens.stream().anyMatch(i -> i.quantidade() <= 0)) {
+            throw new RegraDeNegocioException("Escolha pelo menos um ingresso");
+        }
 
-        // Mesma Idempotency-Key = mesmo clique: devolve o mesmo pedido, sem criar outro
+        // Mesma Idempotency-Key = mesmo clique (duplo toque, rede instável): devolve o pedido que já existe
         var repetido = pedidos.buscarPorUsuarioEChave(usuarioId, chaveIdempotencia);
         if (repetido.isPresent()) {
             return repetido.get();
         }
 
-        Sacola sacola = buscarSacola(credencial, sessaoId);
-
         Instant agora = Instant.now(clock);
-        if (Duration.between(agora, sacola.expiraEm()).compareTo(tempoMinimoParaPagar) < 0) {
-            throw new ConflitoException("Tempo insuficiente para confirmar. Entre na fila novamente");
-        }
-
-        var emUso = pedidos.buscarAtivoPorReservaId(sacola.reservaId());
-        if (emUso.isPresent()) {
-            Pedido existente = emUso.get();
-            // Mesmo usuário e mesma chave: é o mesmo clique chegando junto, não uma nova tentativa
-            if (existente.usuarioId().equals(usuarioId) && existente.chaveIdempotencia().equals(chaveIdempotencia)) {
-                return existente;
-            }
-            throw new SacolaJaEmPedidoException(existente.id());
-        }
-
-        InfoSessao sessao = estoque.buscarSessao(sessaoId);
-
+        List<ItemPedido> solicitados = itens.stream()
+                .map(i -> new ItemPedido(i.setorId(), null, i.quantidade(), null, null))
+                .toList();
         Pedido novo = new Pedido(UUID.randomUUID().toString(), usuarioId, chaveIdempotencia, sessaoId,
-                sessao.eventoId(), sessao.eventoTitulo(), sessao.dataEvento(), sacola.reservaId(),
-                sacola.itens(), sacola.total(), StatusPedido.CONFIRMANDO, null, agora, agora);
+                null, null, null, solicitados, null, StatusPedido.PROCESSANDO, null, agora, agora);
 
         try {
-            // O pedido e a mensagem reserva.confirmar nascem na mesma transação
-            unidade.executar(() -> {
-                pedidos.inserir(novo);
-                publicador.publicar(ReservaConfirmar.ROUTING_KEY, new ReservaConfirmar(novo.id(), novo.reservaId()));
-                return null;
-            });
+            pedidos.inserir(novo);
         } catch (DuplicadoException corrida) {
-            // Dois cliques simultâneos o índice único do banco deixou só um passar
-            return pedidos.buscarPorUsuarioEChave(usuarioId, chaveIdempotencia)
-                    .orElseGet(() -> {
-                        var dono = pedidos.buscarAtivoPorReservaId(sacola.reservaId());
-                        throw dono.isPresent()
-                                ? new SacolaJaEmPedidoException(dono.get().id())
-                                : new ConflitoException("Esta sacola já está em um pedido");
-                    });
+            return pedidos.buscarPorUsuarioEChave(usuarioId, chaveIdempotencia).orElseThrow();
         }
+
+        publicador.publicar(PedidoCriado.ROUTING_KEY, new PedidoCriado(novo.id(), sessaoId, itens));
         return novo;
+    }
+
+    public void aoRealizado(PedidoRealizado mensagem) {
+        Pedido pedido = pedidos.buscarPorId(mensagem.pedidoId()).orElse(null);
+        if (pedido == null || pedido.status() != StatusPedido.PROCESSANDO) {
+            return; // mensagem repetida ou de pedido desconhecido: nada a fazer
+        }
+
+        List<ItemPedido> itens = mensagem.itens().stream()
+                .map(i -> new ItemPedido(i.setorId(), i.setorNome(), i.quantidade(), i.precoUnitario(),
+                        i.precoUnitario().multiply(BigDecimal.valueOf(i.quantidade()))))
+                .toList();
+        BigDecimal total = itens.stream().map(ItemPedido::subtotal).reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        Pedido realizado = new Pedido(pedido.id(), pedido.usuarioId(), pedido.chaveIdempotencia(), pedido.sessaoId(),
+                mensagem.eventoId(), mensagem.eventoTitulo(), mensagem.dataEvento(), itens, total,
+                StatusPedido.REALIZADO, null, pedido.criadoEm(), Instant.now(clock));
+
+        // Status e ingressos gravados juntos: ou os dois, ou nenhum
+        transacao.executar(() -> {
+            if (pedidos.atualizarSeProcessando(realizado)) {
+                ingressos.salvarTodos(emitirIngressos(realizado));
+            }
+            return null;
+        });
+    }
+
+    public void aoCancelado(PedidoCancelado mensagem) {
+        pedidos.buscarPorId(mensagem.pedidoId())
+                .filter(p -> p.status() == StatusPedido.PROCESSANDO)
+                .ifPresent(p -> pedidos.atualizarSeProcessando(new Pedido(p.id(), p.usuarioId(),
+                        p.chaveIdempotencia(), p.sessaoId(), p.eventoId(), p.eventoTitulo(), p.dataEvento(),
+                        p.itens(), p.total(), StatusPedido.CANCELADO, mensagem.motivo(), p.criadoEm(),
+                        Instant.now(clock))));
     }
 
     public PedidoComIngressos consultar(String usuarioId, String pedidoId) {
@@ -115,7 +115,7 @@ public class PedidoService {
                 .filter(p -> p.usuarioId().equals(usuarioId))
                 .orElseThrow(() -> new NaoEncontradoException("Pedido não encontrado"));
 
-        List<IngressoEmitido> emitidos = pedido.status() == StatusPedido.PAGO
+        List<IngressoEmitido> emitidos = pedido.status() == StatusPedido.REALIZADO
                 ? ingressos.listarPorPedido(pedido.id())
                 : List.of();
         return new PedidoComIngressos(pedido, emitidos);
@@ -127,48 +127,6 @@ public class PedidoService {
 
     public List<IngressoEmitido> meusIngressos(String usuarioId) {
         return ingressos.listarPorUsuario(usuarioId);
-    }
-
-    public void aoReservaConfirmada(String eventoId, ReservaConfirmada mensagem) {
-        unicaVez(eventoId, () -> {
-            boolean mudou = pedidos.transicionar(mensagem.pedidoId(), StatusPedido.CONFIRMANDO,
-                    StatusPedido.PAGO, null, Instant.now(clock));
-            if (mudou) {
-                Pedido pedido = pedidos.buscarPorId(mensagem.pedidoId()).orElseThrow();
-                ingressos.salvarTodos(emitirIngressos(pedido));
-                publicador.publicar(PedidoPago.ROUTING_KEY, new PedidoPago(pedido.id(), pedido.usuarioId(),
-                        pedido.sessaoId(), pedido.reservaId()));
-            }
-        });
-    }
-
-    public void aoReservaFalhou(String eventoId, ReservaConfirmacaoFalhou mensagem) {
-        unicaVez(eventoId, () ->
-                pedidos.transicionar(mensagem.pedidoId(), StatusPedido.CONFIRMANDO,
-                        StatusPedido.CANCELADO, mensagem.motivo(), Instant.now(clock)));
-    }
-
-    private void unicaVez(String eventoId, Runnable efeito) {
-        if (processados.jaProcessado(eventoId)) {
-            return;
-        }
-        try {
-            unidade.executar(() -> {
-                processados.registrar(eventoId);
-                efeito.run();
-                return null;
-            });
-        } catch (MensagemDuplicadaException duplicada) {
-            // Outra entrega da mesma mensagem venceu a corrida: o trabalho já foi feito
-        }
-    }
-
-    private Sacola buscarSacola(String credencial, String sessaoId) {
-        try {
-            return fila.buscarSacola(credencial, sessaoId);
-        } catch (NaoEncontradoException vazia) {
-            throw new ConflitoException("Sua sacola está vazia ou o tempo acabou");
-        }
     }
 
     private List<IngressoEmitido> emitirIngressos(Pedido pedido) {

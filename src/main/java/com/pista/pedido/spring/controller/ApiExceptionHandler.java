@@ -12,8 +12,6 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import com.pista.pedido.domain.exception.ConflitoException;
 import com.pista.pedido.domain.exception.NaoEncontradoException;
 import com.pista.pedido.domain.exception.RegraDeNegocioException;
-import com.pista.pedido.domain.exception.SacolaJaEmPedidoException;
-import com.pista.pedido.domain.exception.ServicoIndisponivelException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -27,12 +25,6 @@ public class ApiExceptionHandler {
         return erro(HttpStatus.BAD_REQUEST, e.getMessage());
     }
 
-    @ExceptionHandler(SacolaJaEmPedidoException.class)
-    public ResponseEntity<Map<String, String>> sacolaJaEmPedido(SacolaJaEmPedidoException e) {
-        return ResponseEntity.status(HttpStatus.CONFLICT)
-                .body(Map.of("message", e.getMessage(), "pedidoId", e.pedidoId()));
-    }
-
     @ExceptionHandler(ConflitoException.class)
     public ResponseEntity<Map<String, String>> conflito(ConflitoException e) {
         return erro(HttpStatus.CONFLICT, e.getMessage());
@@ -41,11 +33,6 @@ public class ApiExceptionHandler {
     @ExceptionHandler(NaoEncontradoException.class)
     public ResponseEntity<Map<String, String>> naoEncontrado(NaoEncontradoException e) {
         return erro(HttpStatus.NOT_FOUND, e.getMessage());
-    }
-
-    @ExceptionHandler(ServicoIndisponivelException.class)
-    public ResponseEntity<Map<String, String>> indisponivel(ServicoIndisponivelException e) {
-        return erro(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

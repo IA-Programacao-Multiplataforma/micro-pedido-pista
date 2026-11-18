@@ -7,6 +7,7 @@ import java.util.List;
 
 import com.pista.pedido.domain.entity.enumerable.StatusPedido;
 
+// Enquanto PROCESSANDO, só se sabe sessão, setores e quantidades; título, preços e total chegam com o REALIZADO
 public record Pedido(
         String id,
         String usuarioId,
@@ -15,7 +16,6 @@ public record Pedido(
         String eventoId,
         String eventoTitulo,
         LocalDateTime dataEvento,
-        String reservaId,
         List<ItemPedido> itens,
         BigDecimal total,
         StatusPedido status,

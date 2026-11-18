@@ -27,20 +27,19 @@ public class RelatorioService {
         List<Pedido> todos = pedidos.listarTodos();
 
         Map<String, EventoAcumulado> porEvento = new LinkedHashMap<>();
-        int pagos = 0, recusados = 0, cancelados = 0, emAndamento = 0, ingressos = 0;
+        int realizados = 0, cancelados = 0, emAndamento = 0, ingressos = 0;
         BigDecimal receita = BigDecimal.ZERO;
 
         for (Pedido pedido : todos) {
             switch (pedido.status()) {
-                case RECUSADO -> recusados++;
                 case CANCELADO -> cancelados++;
-                case PENDENTE, CONFIRMANDO -> emAndamento++;
-                case PAGO -> {
-                    pagos++;
+                case PROCESSANDO -> emAndamento++;
+                case REALIZADO -> {
+                    realizados++;
                     receita = receita.add(pedido.total());
                     EventoAcumulado evento = porEvento.computeIfAbsent(pedido.eventoId(),
                             id -> new EventoAcumulado(id, pedido.eventoTitulo()));
-                    evento.pedidosPagos++;
+                    evento.pedidosRealizados++;
                     evento.receita = evento.receita.add(pedido.total());
                     for (ItemPedido item : pedido.itens()) {
                         ingressos += item.quantidade();
@@ -58,14 +57,14 @@ public class RelatorioService {
                 .sorted(Comparator.comparing(PorEvento::receita).reversed())
                 .toList();
 
-        return new RelatorioVendas(new Totais(pagos, recusados, cancelados, emAndamento, ingressos, receita), eventos);
+        return new RelatorioVendas(new Totais(realizados, cancelados, emAndamento, ingressos, receita), eventos);
     }
 
     private static class EventoAcumulado {
         final String eventoId;
         final String titulo;
         final Map<String, SetorAcumulado> setores = new LinkedHashMap<>();
-        int pedidosPagos;
+        int pedidosRealizados;
         int ingressos;
         BigDecimal receita = BigDecimal.ZERO;
 
@@ -78,7 +77,7 @@ public class RelatorioService {
             List<PorSetor> lista = setores.entrySet().stream()
                     .map(e -> new PorSetor(e.getKey(), e.getValue().ingressos, e.getValue().receita))
                     .toList();
-            return new PorEvento(eventoId, titulo, pedidosPagos, ingressos, receita, lista);
+            return new PorEvento(eventoId, titulo, pedidosRealizados, ingressos, receita, lista);
         }
     }
 

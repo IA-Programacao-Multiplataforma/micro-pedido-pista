@@ -4,7 +4,6 @@ import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,6 +14,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.pista.pedido.domain.entity.Pedido;
+import com.pista.pedido.domain.evento.PedidoCriado;
 import com.pista.pedido.domain.service.PedidoService;
 import com.pista.pedido.spring.controller.adapter.PedidoControllerAdapter;
 import com.pista.pedido.spring.controller.dto.request.CriarPedidoRequest;
@@ -35,7 +35,7 @@ public class PedidoController {
         this.service = service;
     }
 
-    // Responde 202 na hora; a reserva é confirmada no estoque e os ingressos são emitidos depois, por mensagens.
+    // INÍCIO DO CICLO: responde 202 com o pedido PROCESSANDO; o estoque decide depois, por mensagem
     @ResponseStatus(HttpStatus.ACCEPTED)
     @PostMapping("/pedidos")
     public CriarPedidoResponse criar(
@@ -43,11 +43,10 @@ public class PedidoController {
             @Valid @RequestBody CriarPedidoRequest request,
             Authentication authentication) {
 
-        // O token do cliente é repassado à fila, que confere que a sacola é dele
-        String token = ((Jwt) authentication.getPrincipal()).getTokenValue();
-
-        Pedido pedido = service.criar(authentication.getName(), token, chaveIdempotencia,
-                request.sessaoId());
+        List<PedidoCriado.Item> itens = request.itens().stream()
+                .map(i -> new PedidoCriado.Item(i.setorId(), i.quantidade()))
+                .toList();
+        Pedido pedido = service.criar(authentication.getName(), chaveIdempotencia, request.sessaoId(), itens);
         return PedidoControllerAdapter.toCriado(pedido);
     }
 

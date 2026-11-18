@@ -30,7 +30,7 @@ class RelatorioServiceTest {
     private static Pedido pedido(String id, String eventoId, String titulo, StatusPedido status, ItemPedido... itens) {
         BigDecimal total = List.of(itens).stream().map(ItemPedido::subtotal).reduce(BigDecimal.ZERO, BigDecimal::add);
         return new Pedido(id, "u-1", "chave-" + id, "sess-1", eventoId, titulo,
-                LocalDateTime.of(2027, 10, 18, 20, 0), "res-" + id, List.of(itens), total, status, null,
+                LocalDateTime.of(2027, 10, 18, 20, 0), List.of(itens), total, status, null,
                 Instant.parse("2026-10-01T12:00:00Z"), Instant.parse("2026-10-01T12:00:00Z"));
     }
 
@@ -46,20 +46,17 @@ class RelatorioServiceTest {
     }
 
     @Test
-    void soPedidosPagosContamComoVenda() {
+    void soPedidosRealizadosContamComoVenda() {
         when(repositorio.listarTodos()).thenReturn(List.of(
-                pedido("1", "e1", "Festival", StatusPedido.PAGO, item("Pista", 2, "100.00")),
-                pedido("2", "e1", "Festival", StatusPedido.RECUSADO, item("Pista", 4, "100.00")),
-                pedido("3", "e1", "Festival", StatusPedido.CANCELADO, item("Pista", 1, "100.00")),
-                pedido("4", "e1", "Festival", StatusPedido.PENDENTE, item("Pista", 1, "100.00")),
-                pedido("5", "e1", "Festival", StatusPedido.CONFIRMANDO, item("Pista", 1, "100.00"))));
+                pedido("1", "e1", "Festival", StatusPedido.REALIZADO, item("Pista", 2, "100.00")),
+                pedido("2", "e1", "Festival", StatusPedido.CANCELADO, item("Pista", 4, "100.00")),
+                pedido("3", "e1", "Festival", StatusPedido.PROCESSANDO, item("Pista", 1, "100.00"))));
 
         RelatorioVendas.Totais totais = service.gerar().totais();
 
-        assertThat(totais.pedidosPagos()).isEqualTo(1);
-        assertThat(totais.pedidosRecusados()).isEqualTo(1);
+        assertThat(totais.pedidosRealizados()).isEqualTo(1);
         assertThat(totais.pedidosCancelados()).isEqualTo(1);
-        assertThat(totais.pedidosEmAndamento()).isEqualTo(2);
+        assertThat(totais.pedidosEmAndamento()).isEqualTo(1);
         assertThat(totais.ingressosVendidos()).isEqualTo(2);
         assertThat(totais.receita()).isEqualByComparingTo("200.00");
     }
@@ -67,9 +64,9 @@ class RelatorioServiceTest {
     @Test
     void somaPorEventoESetorEOrdenaPelaMaiorReceita() {
         when(repositorio.listarTodos()).thenReturn(List.of(
-                pedido("1", "e1", "Festival", StatusPedido.PAGO, item("Pista", 2, "100.00"), item("Camarote", 1, "300.00")),
-                pedido("2", "e1", "Festival", StatusPedido.PAGO, item("Pista", 3, "100.00")),
-                pedido("3", "e2", "Teatro", StatusPedido.PAGO, item("Plateia", 1, "50.00"))));
+                pedido("1", "e1", "Festival", StatusPedido.REALIZADO, item("Pista", 2, "100.00"), item("Camarote", 1, "300.00")),
+                pedido("2", "e1", "Festival", StatusPedido.REALIZADO, item("Pista", 3, "100.00")),
+                pedido("3", "e2", "Teatro", StatusPedido.REALIZADO, item("Plateia", 1, "50.00"))));
 
         RelatorioVendas relatorio = service.gerar();
 
@@ -77,7 +74,7 @@ class RelatorioServiceTest {
                 .containsExactly("Festival", "Teatro");
 
         RelatorioVendas.PorEvento festival = relatorio.eventos().get(0);
-        assertThat(festival.pedidosPagos()).isEqualTo(2);
+        assertThat(festival.pedidosRealizados()).isEqualTo(2);
         assertThat(festival.ingressosVendidos()).isEqualTo(6);
         assertThat(festival.receita()).isEqualByComparingTo("800.00");
         assertThat(festival.setores()).extracting(RelatorioVendas.PorSetor::setorNome)
@@ -91,9 +88,9 @@ class RelatorioServiceTest {
     }
 
     @Test
-    void eventoSemVendaPagaNaoApareceNoRelatorio() {
+    void eventoSemVendaRealizadaNaoApareceNoRelatorio() {
         when(repositorio.listarTodos()).thenReturn(List.of(
-                pedido("1", "e1", "Festival", StatusPedido.RECUSADO, item("Pista", 2, "100.00"))));
+                pedido("1", "e1", "Festival", StatusPedido.CANCELADO, item("Pista", 2, "100.00"))));
 
         assertThat(service.gerar().eventos()).isEmpty();
     }

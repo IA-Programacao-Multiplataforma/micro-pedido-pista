@@ -1,5 +1,5 @@
 server:
-  port: 8083
+  port: ${PORT:8083}
 
 spring:
   application:
@@ -11,9 +11,9 @@ spring:
       uri: ${MONGO_URI}
   rabbitmq:
     addresses: ${RABBITMQ_URI}
-    publisher-confirm-type: correlated
     listener:
       simple:
+        # Se o processamento falhar, tenta 3 vezes e depois manda para a fila morta (.dlq)
         default-requeue-rejected: false
         retry:
           enabled: true
@@ -23,15 +23,3 @@ spring:
 
 jwt:
   secret: ${JWT_SECRET}
-
-fila:
-  url: http://localhost:8084
-estoque:
-  url: http://localhost:8082
-
-pedido:
-  tempo-minimo-pagar-segundos: 60
-
-mensageria:
-  outbox:
-    intervalo-ms: 1000

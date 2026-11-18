@@ -9,17 +9,18 @@ import org.springframework.amqp.core.TopicExchange;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import com.pista.pedido.domain.evento.ReservaConfirmacaoFalhou;
-import com.pista.pedido.domain.evento.ReservaConfirmada;
+import com.pista.pedido.domain.evento.PedidoCancelado;
+import com.pista.pedido.domain.evento.PedidoRealizado;
 
-// O pedido publica reserva.confirmar e pedido.pago (quem consome declara a própria fila) e consome a fila abaixo.
+// O pedido publica "pedido.criado" (a fila é do estoque) e consome a resposta do estoque na fila abaixo
 @Configuration
 public class Topologia {
 
     public static final String EXCHANGE = "pista.eventos";
     public static final String EXCHANGE_MORTAS = "pista.eventos.dlx";
 
-    public static final String FILA_RESERVA_RESULTADO = "pedido.reserva-resultado";
+    public static final String FILA_RESPOSTA_ESTOQUE = "pedido.resposta-estoque";
+    public static final String FILA_RESPOSTA_ESTOQUE_DLQ = FILA_RESPOSTA_ESTOQUE + ".dlq";
 
     @Bean
     public TopicExchange exchangePrincipal() {
@@ -32,50 +33,30 @@ public class Topologia {
     }
 
     @Bean
-    public Queue filaReservaResultado() {
-        return comDlq(FILA_RESERVA_RESULTADO);
-    }
-
-    @Bean
-    public Queue filaReservaResultadoMorta() {
-        return QueueBuilder.durable(FILA_RESERVA_RESULTADO + ".dlq").build();
-    }
-
-    @Bean
-    public Binding ligacaoReservaConfirmada() {
-        return BindingBuilder.bind(filaReservaResultado()).to(exchangePrincipal())
-                .with(ReservaConfirmada.ROUTING_KEY);
-    }
-
-    @Bean
-    public Binding ligacaoReservaFalhou() {
-        return BindingBuilder.bind(filaReservaResultado()).to(exchangePrincipal())
-                .with(ReservaConfirmacaoFalhou.ROUTING_KEY);
-    }
-
-    @Bean
-    public Binding ligacaoReservaResultadoMorta() {
-        return BindingBuilder.bind(filaReservaResultadoMorta()).to(exchangeMortas())
-                .with(FILA_RESERVA_RESULTADO + ".dlq");
-    }
-
-    // Auditoria: binding "#" copia todas as mensagens; sem consumidor, elas ficam visíveis no painel do RabbitMQ.
-    public static final String FILA_AUDITORIA = "pista.auditoria";
-
-    @Bean
-    public Queue filaAuditoria() {
-        return QueueBuilder.durable(FILA_AUDITORIA).build();
-    }
-
-    @Bean
-    public Binding ligacaoAuditoria() {
-        return BindingBuilder.bind(filaAuditoria()).to(exchangePrincipal()).with("#");
-    }
-
-    private Queue comDlq(String nome) {
-        return QueueBuilder.durable(nome)
+    public Queue filaRespostaEstoque() {
+        return QueueBuilder.durable(FILA_RESPOSTA_ESTOQUE)
                 .deadLetterExchange(EXCHANGE_MORTAS)
-                .deadLetterRoutingKey(nome + ".dlq")
+                .deadLetterRoutingKey(FILA_RESPOSTA_ESTOQUE_DLQ)
                 .build();
+    }
+
+    @Bean
+    public Queue filaRespostaEstoqueMorta() {
+        return QueueBuilder.durable(FILA_RESPOSTA_ESTOQUE_DLQ).build();
+    }
+
+    @Bean
+    public Binding ligacaoRealizado() {
+        return BindingBuilder.bind(filaRespostaEstoque()).to(exchangePrincipal()).with(PedidoRealizado.ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding ligacaoCancelado() {
+        return BindingBuilder.bind(filaRespostaEstoque()).to(exchangePrincipal()).with(PedidoCancelado.ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding ligacaoRespostaEstoqueMorta() {
+        return BindingBuilder.bind(filaRespostaEstoqueMorta()).to(exchangeMortas()).with(FILA_RESPOSTA_ESTOQUE_DLQ);
     }
 }
