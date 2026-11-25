@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.retry.RetryTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -24,6 +25,7 @@ import com.pista.pedido.domain.exception.ServicoIndisponivelException;
 public class HttpFilaClient implements FilaClient {
 
     private final RestClient http;
+    private final RetryTemplate retentativa = RetentativaHttp.criar();
 
     public HttpFilaClient(@Value("${fila.url}") String url) {
         JdkClientHttpRequestFactory fabrica = new JdkClientHttpRequestFactory(
@@ -36,11 +38,11 @@ public class HttpFilaClient implements FilaClient {
     @Override
     public Sacola buscarSacola(String credencial, String sessaoId) {
         try {
-            SacolaJson json = http.get()
+            SacolaJson json = retentativa.invoke(() -> http.get()
                     .uri("/sessoes/{id}/sacola", sessaoId)
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + credencial)
                     .retrieve()
-                    .body(SacolaJson.class);
+                    .body(SacolaJson.class));
 
             return new Sacola(json.reservaId(), json.sessaoId(), json.expiraEm(),
                     json.itens().stream()

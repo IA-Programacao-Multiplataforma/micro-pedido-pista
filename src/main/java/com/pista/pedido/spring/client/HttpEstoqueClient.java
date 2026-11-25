@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.retry.RetryTemplate;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
@@ -20,6 +21,7 @@ import com.pista.pedido.domain.exception.ServicoIndisponivelException;
 public class HttpEstoqueClient implements EstoqueClient {
 
     private final RestClient http;
+    private final RetryTemplate retentativa = RetentativaHttp.criar();
 
     public HttpEstoqueClient(@Value("${estoque.url}") String url) {
         JdkClientHttpRequestFactory fabrica = new JdkClientHttpRequestFactory(
@@ -32,7 +34,8 @@ public class HttpEstoqueClient implements EstoqueClient {
     @Override
     public InfoSessao buscarSessao(String sessaoId) {
         try {
-            SessaoJson json = http.get().uri("/sessoes/{id}", sessaoId).retrieve().body(SessaoJson.class);
+            SessaoJson json = retentativa.invoke(() ->
+                    http.get().uri("/sessoes/{id}", sessaoId).retrieve().body(SessaoJson.class));
             return new InfoSessao(json.eventoId(), json.eventoTitulo(), json.dataEvento());
         } catch (RestClientResponseException e) {
             if (e.getStatusCode().value() == 404) {

@@ -12,7 +12,6 @@ import com.pista.pedido.domain.entity.RelatorioVendas;
 import com.pista.pedido.domain.entity.RelatorioVendas.PorEvento;
 import com.pista.pedido.domain.entity.RelatorioVendas.PorSetor;
 import com.pista.pedido.domain.entity.RelatorioVendas.Totais;
-import com.pista.pedido.domain.entity.enumerable.StatusPedido;
 import com.pista.pedido.domain.repository.PedidoRepository;
 
 public class RelatorioService {
